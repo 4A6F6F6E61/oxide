@@ -1,3 +1,5 @@
+import type { WSEvent, WSMessage } from "../../common/types.ts";
+
 export class State<T> {
   private uuid: string;
   constructor(private ws: WebSocket, private value: T) {
@@ -20,11 +22,14 @@ export class State<T> {
   }
 }
 
-export type WSEvent = "hydrate" | "update" | "run";
-
 export type Functions = {
   $state: <T>(value: T) => State<T>;
-  $send: (event: WSEvent, data: string) => void;
+  /**
+   * Send a message to the client
+   * @param message The WebSocket message to send
+   * @returns void
+   */
+  $send: (message: WSMessage) => void;
   $socket: () => WebSocket;
   /**
    * Listen for a specific message event
@@ -37,7 +42,7 @@ export type Functions = {
    * @param _callback function body
    * @returns The callable reference to the function
    */
-  $func: <T>(body: () => T) => () => T;
+  $func: <T>(name: string, body: () => T) => () => T;
 };
 
 export const makeServer = (
@@ -52,8 +57,8 @@ export const makeServer = (
 
     const { socket, response } = Deno.upgradeWebSocket(req);
     socket.addEventListener("open", () => {
-      const $send = (event: WSEvent, data: string): void => {
-        socket.send(JSON.stringify({ event, data }));
+      const $send = (message: WSMessage): void => {
+        socket.send(JSON.stringify(message));
       };
       const $message = (event: string, _callback: (data: string) => void) => {
         socket.addEventListener("message", e => {
@@ -66,22 +71,28 @@ export const makeServer = (
 
       console.log("a client connected!");
 
+      const functions = new Map<string, <T>() => T>();
+
       const html = callback({
         $state: <T>(value: T) => new State<T>(socket, value),
         $send,
         $socket: () => socket,
         $message,
-        $func: <T>(body: () => T): (() => T) => {
-          // TODO: Add register logic here
+        $func: <T>(name: string, body: () => T): (() => T) => {
+          if (functions.has(name)) {
+            throw new Error(`Function ${name} already exists`);
+          }
+          functions.set(name, body as <T>() => T);
           return body;
         },
       });
       $message("run", func => {
         console.log("Running function:", func);
 
-        console.log(self);
+        const f = functions.get(func) ?? (() => {});
+        f();
       });
-      $send("hydrate", html);
+      $send({ event: "hydrate", data: html });
     });
     return response;
   });

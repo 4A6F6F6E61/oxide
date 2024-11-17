@@ -1,3 +1,5 @@
+import type { WSMessage } from "../../common/types.ts";
+
 export interface CustomWindow extends Window {
   $run: (func: string) => void;
 }
@@ -20,7 +22,7 @@ export const makeClient = (parent: string, url: string | URL) => {
   };
 
   ws.onmessage = event => {
-    const message = JSON.parse(event.data);
+    const message: WSMessage = JSON.parse(event.data);
 
     console.log("Received message:", message);
 
@@ -30,7 +32,8 @@ export const makeClient = (parent: string, url: string | URL) => {
         handleHydrate(message.data);
         break;
       case "update":
-        handleUpdate(message.ref, message.data);
+        if (message.ref) handleUpdate(message.ref, message.data);
+        else console.error("No ref provided for update event");
         break;
       default:
         console.error("Unknown message event:", message.event);
