@@ -1,4 +1,4 @@
-import { makeServer } from "./make_server.ts";
+import { makeServer } from "../lib/main.ts";
 
 makeServer(8000, "0.0.0.0", ({ $state, $func }) => {
   const counter = $state(1);

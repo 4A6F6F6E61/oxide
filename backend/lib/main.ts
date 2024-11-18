@@ -22,7 +22,21 @@ export class State<T> {
   }
 }
 
-export type Functions = {
+interface Component {
+  render(helper: Helper): string;
+}
+
+class Test implements Component {
+  render({ $state }: Helper): string {
+    const counter = $state(666);
+
+    return /*html*/ `
+      <div>Test State: ${counter}<div>
+    `;
+  }
+}
+
+export type Helper = {
   $state: <T>(value: T) => State<T>;
   /**
    * Send a message to the client
@@ -36,7 +50,7 @@ export type Functions = {
    * @param event The event to listen for
    * @param callback The callback to run when the event is received
    */
-  $message: (event: string, callback: (data: string) => void) => void;
+  $message: (event: WSEvent, callback: (data: string) => void) => void;
   /**
    * Helper to register a function that can be called from the client
    * @param _callback function body
@@ -45,10 +59,12 @@ export type Functions = {
   $func: <T>(name: string, body: () => T) => () => T;
 };
 
+export type Function = <T>() => T;
+
 export const makeServer = (
   port: number,
   hostname: string,
-  callback: (helpers: Functions) => string
+  callback: (helpers: Helper) => string
 ) => {
   Deno.serve({ port, hostname }, req => {
     if (req.headers.get("upgrade") != "websocket") {
@@ -57,34 +73,21 @@ export const makeServer = (
 
     const { socket, response } = Deno.upgradeWebSocket(req);
     socket.addEventListener("open", () => {
-      const $send = (message: WSMessage): void => {
-        socket.send(JSON.stringify(message));
-      };
-      const $message = (event: string, _callback: (data: string) => void) => {
-        socket.addEventListener("message", e => {
-          const message = JSON.parse(e.data);
-          if (message.event === event) {
-            _callback(message.data);
-          }
-        });
-      };
-
       console.log("a client connected!");
 
-      const functions = new Map<string, <T>() => T>();
+      const $state = make$state(socket);
+      const $send = make$send(socket);
+      const $socket = () => socket;
+      const $message = make$message(socket);
+      const functions = new Map<string, Function>();
+      const $func = make$func(functions);
 
       const html = callback({
-        $state: <T>(value: T) => new State<T>(socket, value),
+        $state,
         $send,
-        $socket: () => socket,
+        $socket,
         $message,
-        $func: <T>(name: string, body: () => T): (() => T) => {
-          if (functions.has(name)) {
-            throw new Error(`Function ${name} already exists`);
-          }
-          functions.set(name, body as <T>() => T);
-          return body;
-        },
+        $func,
       });
       $message("run", func => {
         console.log("Running function:", func);
@@ -97,3 +100,33 @@ export const makeServer = (
     return response;
   });
 };
+
+const make$state =
+  <T>(socket: WebSocket) =>
+  <T>(value: T) =>
+    new State<T>(socket, value);
+
+const make$send = (socket: WebSocket) => (message: WSMessage) => {
+  socket.send(JSON.stringify(message));
+};
+
+const make$message =
+  (socket: WebSocket) =>
+  (event: WSEvent, _callback: (data: string) => void) => {
+    socket.addEventListener("message", e => {
+      const message = JSON.parse(e.data);
+      if (message.event === event) {
+        _callback(message.data);
+      }
+    });
+  };
+
+const make$func =
+  (functions: Map<string, Function>) =>
+  <T>(name: string, body: () => T): (() => T) => {
+    if (functions.has(name)) {
+      throw new Error(`Function ${name} already exists`);
+    }
+    functions.set(name, body as <T>() => T);
+    return body;
+  };

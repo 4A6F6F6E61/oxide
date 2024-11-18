@@ -1,3 +1,3 @@
-import { makeClient } from "./make_client.ts";
+import { makeClient } from "../lib/main.ts";
 
 makeClient("#app", "ws://localhost:8000");
